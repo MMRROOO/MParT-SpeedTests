@@ -12,7 +12,7 @@ TODO: ADD DESCRIPTION
 
 #include <Kokkos_Core.hpp>
 #include <Kokkos_Random.hpp>
-
+#include "MParT/ComposedMap.h"
 #include <MParT/ConditionalMapBase.h>
 #include <MParT/MapFactory.h>
 #include <MParT/MultiIndices/MultiIndexSet.h>
@@ -103,30 +103,24 @@ Kokkos::View<double**,Kokkos::LayoutLeft, MemorySpace> Generator<MemorySpace>::P
 
 int main(int argc, char* argv[]){
 
-    assert(argc>=2);
+    //assert(argc>=2);
     std::string backend = argv[1];
     
-    Kokkos::InitArguments args;
-    if(argc==3)
-        args.num_threads = std::stoi(argv[2]);
-    else
-        args.num_threads = 1;
-
     const unsigned int dim = 5;
     const unsigned int order = 5;
     
-    Kokkos::initialize(args);
+    Kokkos::initialize(argc, argv);
     {
     MapOptions opts;
     //opts.quadType = QuadTypes::AdaptiveSimpson;
     //std::string quad_string = "simpson";
 
     // Or
-    opts.quadType = QuadTypes::ClenshawCurtis;
-    opts.quadPts = 5;
-    std::string quad_string = "cc" + std::to_string(opts.quadPts);
-    
-    unsigned int nn = 7;
+    //opts.quadType = QuadTypes::ClenshawCurtis;
+   // opts.quadPts = 5;
+    //std::string quad_string = "cc" + std::to_string(opts.quadPts);
+    opts.basisType = BasisTypes::HermiteFunctions; 
+    unsigned int nn = 6;
 
     Generator<Kokkos::DefaultExecutionSpace::memory_space> gen;
 
@@ -139,22 +133,51 @@ int main(int argc, char* argv[]){
 
     auto tEval = Eigen::MatrixXd(nn,nk);
     auto tLogDet = Eigen::MatrixXd(nn,nk);
-
+    auto tInv = Eigen::MatrixXd(nn,nk);
+    auto tCoeffGrad = Eigen::MatrixXd(nn,nk);
 
     std::cout << "\nRunning Backend " << backend << std::endl;
 
     for (unsigned int n=0; n<nn;++n){
+        unsigned int num_sigmoids = 5;
+        unsigned int numCenters = 2 + num_sigmoids*(num_sigmoids+1)/2;
+	Kokkos::View<double*, Kokkos::DefaultExecutionSpace::memory_space> centers("Centers", numCenters);             
+        double bound = 3.;
+        centers(0) = -bound; centers(1) = bound;
+        unsigned int center_idx = 2;
         
-        auto map = MapFactory::CreateTriangular<Kokkos::DefaultExecutionSpace::memory_space>(dim,dim,order,opts);
-        
+	Kokkos::parallel_for(Kokkos::MDRangePolicy<Kokkos::Rank<2>>({0,0},{num_sigmoids,num_sigmoids}), 
+			KOKKOS_LAMBDA (int j, int i)
+				{if (i <= j){
+					centers(2+(j)+num_sigmoids*i) = -bound+(2*bound)*(i+1)/(j+2);
+					}
+				}
+			);
+	
+	//int numMaps = 3;	    
+        //std::vector<std::shared_ptr<ConditionalMapBase<Kokkos::DefaultExecutionSpace::memory_space>>> maps(numMaps);
+        //for(unsigned int i=0;i<numMaps;++i){
+	    std::vector<StridedVector<const double, Kokkos::DefaultExecutionSpace::memory_space>> centers_vec;
+	    for(int i = 0; i < dim; i++){
+                centers_vec.push_back(centers);
+            } 
+	    std::shared_ptr<ConditionalMapBase<Kokkos::DefaultExecutionSpace::memory_space>> map = MapFactory::CreateSigmoidTriangular<Kokkos::DefaultExecutionSpace::memory_space>(dim, dim, order,centers_vec, opts);
+        //}
+
+        //std::shared_ptr<ConditionalMapBase<Kokkos::DefaultExecutionSpace::memory_space>> map = std::make_shared<ComposedMap<Kokkos::DefaultExecutionSpace::memory_space>>(maps);
         auto numCoeffs = map->numCoeffs;
-        unsigned int numPts = pow(10,(6-n));
+        unsigned int numPts = pow(10,(5-n));
 
         // auto tEval = Eigen::VectorXd(nk);
         // auto tLogDet = Eigen::VectorXd(nk);
 
         std::cout << "\n    NPts = " << numPts << ",  Trial: " << 0 << "/" << nk-1 << std::flush;
-
+	Kokkos::View<double**, Kokkos::DefaultExecutionSpace::memory_space> sens("Sensitivities", map->outputDim, numPts);
+	Kokkos::parallel_for(Kokkos::MDRangePolicy<Kokkos::Rank<2>>({0,0},{map->outputDim,numPts}), 
+			KOKKOS_LAMBDA (int i, int j)
+				{sens(i,j) = 1.0 + 0.1*i + j;}
+			);
+	
         for(unsigned int k=0; k<nk;++k){
 
             // Print the current trial.  use \b to overwrite the previous number
@@ -162,7 +185,7 @@ int main(int argc, char* argv[]){
                 std::cout << "\b";
             std::cout << k << "/" << nk-1 << std::flush;
 
-            Kokkos::View<double*> coeffs = gen.Coeffs(numCoeffs);            
+            Kokkos::View<const double*> coeffs = gen.Coeffs(numCoeffs);            
             map->SetCoeffs(coeffs); 
 
             Kokkos::View<double**,Kokkos::LayoutLeft> pts = gen.Points(dim,numPts);
@@ -178,6 +201,21 @@ int main(int argc, char* argv[]){
             auto stop2 = high_resolution_clock::now();
             auto duration2 = duration_cast<microseconds>(stop2 - start2);
             tLogDet(n,k)=duration2.count();
+
+	    auto start3 = high_resolution_clock::now();
+            auto Inverse = map->Inverse(pts, evals);
+            auto stop3 = high_resolution_clock::now();
+            auto duration3 = duration_cast<microseconds>(stop3 - start3);
+            tInv(n,k)=duration3.count();
+
+           
+	    auto start4 = high_resolution_clock::now();
+            auto coeffGrad = map->CoeffGrad(pts, sens);
+            auto stop4 = high_resolution_clock::now();
+            auto duration4 = duration_cast<microseconds>(stop4 - start4);
+            tCoeffGrad(n,k)=duration4.count();
+
+
         }
         // tEvalMat_m(n)=tEval.mean();
         // tLogDetMat_m(n)=tLogDet.mean();
@@ -187,7 +225,7 @@ int main(int argc, char* argv[]){
     
     {
         std::stringstream filename;
-        filename << "ST_CPP_eval_d5_to" << order << "_nt" << args.num_threads << "_" << backend << "_" << quad_string << ".txt";
+        filename << "ST_CPP_eval_d5_to" << order << "_nt"  << backend << ".txt";
 
         std::ofstream file1(filename.str());  
         if(file1.is_open())  // si l'ouverture a réussi
@@ -198,7 +236,7 @@ int main(int argc, char* argv[]){
 
     {
         std::stringstream filename;
-        filename << "ST_CPP_logdet_d5_to" << order << "_nt" << args.num_threads << "_" << backend << "_" << quad_string << ".txt";
+        filename << "ST_CPP_logdet_d5_to" << order << "_nt"  << backend << ".txt";
 
         std::ofstream file2(filename.str());  
         if(file2.is_open())  // si l'ouverture a réussi
@@ -207,7 +245,26 @@ int main(int argc, char* argv[]){
         }
     }
     
+{
+        std::stringstream filename;
+        filename << "ST_CPP_inv_d5_to" << order << "_nt" << backend << ".txt";
 
+        std::ofstream file3(filename.str());  
+        if(file3.is_open())  // si l'ouverture a réussi
+        {   
+        file3 << tInv << "\n";
+        }
+    }
+    {
+        std::stringstream filename;
+        filename << "ST_CPP_coeffgrad_d5_to" << order << "_nt" << backend << ".txt";
+
+        std::ofstream file3(filename.str());  
+        if(file3.is_open())  // si l'ouverture a réussi
+        {   
+        file3 << tCoeffGrad << "\n";
+        }
+    }
     }
 
     Kokkos::finalize();

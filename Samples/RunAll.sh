@@ -1,9 +1,9 @@
 #!/bin/bash
 
-install_base="/home/jovyan/Installations/"
+install_base="/home/mrowkam/installs/"
 
 # Build the executables for each backend type
-for backend in SERIAL THREADS OPENMP CUDA
+for backend in SERIAL OPENMP CUDA
 do
     
     if [ -d "build-"$backend ]; then 
@@ -35,12 +35,12 @@ export OMP_PROC_BIND=spread
 export OMP_PLACES=threads
 
 # Run the host multithreaded backends
-for backend in THREADS OPENMP
+for backend in OPENMP
 do 
 
     cd "build-"$backend 
 
-    for num_threads in 2 4 8 16 32
+    for num_threads in 32
     do 
         ./SampleSpeed $backend $num_threads
     done 
@@ -54,7 +54,11 @@ cd build-CUDA
 cd ../
 
 # Collect all the results in the "results" folder
-mkdir results 
+ 
+if [ -d results ]; then 
+    rm -rf results 
+fi 
+mkdir results
 
 for backend in SERIAL THREADS OPENMP CUDA
 do
