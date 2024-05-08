@@ -120,7 +120,7 @@ int main(int argc, char* argv[]){
    // opts.quadPts = 5;
     //std::string quad_string = "cc" + std::to_string(opts.quadPts);
     opts.basisType = BasisTypes::HermiteFunctions; 
-    unsigned int nn = 6;
+    unsigned int nn = 4;//7
 
     Generator<Kokkos::DefaultExecutionSpace::memory_space> gen;
 
@@ -143,30 +143,36 @@ int main(int argc, char* argv[]){
         unsigned int numCenters = 2 + num_sigmoids*(num_sigmoids+1)/2;
 	Kokkos::View<double*, Kokkos::DefaultExecutionSpace::memory_space> centers("Centers", numCenters);             
         double bound = 3.;
-        centers(0) = -bound; centers(1) = bound;
         unsigned int center_idx = 2;
         
 	Kokkos::parallel_for(Kokkos::MDRangePolicy<Kokkos::Rank<2>>({0,0},{num_sigmoids,num_sigmoids}), 
 			KOKKOS_LAMBDA (int j, int i)
 				{if (i <= j){
-					centers(2+(j)+num_sigmoids*i) = -bound+(2*bound)*(i+1)/(j+2);
+					int index = j*((j-1)/2)+i;
+					centers(index+2) = -bound+(2*bound)*(i+1)/(j+2);
 					}
+				if (i == 0 && j == 0){
+				centers(0) = -3;
+				centers(1) = 3;
 				}
+				}
+
 			);
 	
 	//int numMaps = 3;	    
         //std::vector<std::shared_ptr<ConditionalMapBase<Kokkos::DefaultExecutionSpace::memory_space>>> maps(numMaps);
         //for(unsigned int i=0;i<numMaps;++i){
 	    std::vector<StridedVector<const double, Kokkos::DefaultExecutionSpace::memory_space>> centers_vec;
-	    for(int i = 0; i < dim; i++){
-                centers_vec.push_back(centers);
-            } 
+	    for (int i =0; i< dim; i++){
+		centers_vec.push_back(centers);
+	    }
+             
 	    std::shared_ptr<ConditionalMapBase<Kokkos::DefaultExecutionSpace::memory_space>> map = MapFactory::CreateSigmoidTriangular<Kokkos::DefaultExecutionSpace::memory_space>(dim, dim, order,centers_vec, opts);
         //}
 
         //std::shared_ptr<ConditionalMapBase<Kokkos::DefaultExecutionSpace::memory_space>> map = std::make_shared<ComposedMap<Kokkos::DefaultExecutionSpace::memory_space>>(maps);
         auto numCoeffs = map->numCoeffs;
-        unsigned int numPts = pow(10,(5-n));
+        unsigned int numPts = pow(10,(3-n));
 
         // auto tEval = Eigen::VectorXd(nk);
         // auto tLogDet = Eigen::VectorXd(nk);

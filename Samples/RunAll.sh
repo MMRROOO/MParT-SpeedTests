@@ -3,7 +3,7 @@
 install_base="/home/mrowkam/installs/"
 
 # Build the executables for each backend type
-for backend in SERIAL OPENMP CUDA
+for backend in  CUDA
 do
     
     if [ -d "build-"$backend ]; then 
@@ -28,7 +28,7 @@ done
 
 # Run the serial tests 
 cd build-SERIAL 
-./SampleSpeed SERIAL 
+#./SampleSpeed SERIAL 
 cd ../ 
 
 export OMP_PROC_BIND=spread
